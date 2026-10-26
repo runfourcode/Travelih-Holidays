@@ -199,6 +199,33 @@
 
     <section class="card" style="margin-top: 20px;">
       <div class="card-header">
+        <h3>Document verification tool</h3>
+      </div>
+      <div class="card-body">
+        <div class="form-grid" style="display:grid;gap:12px;max-width:520px">
+          <div class="field" style="display:grid;gap:6px">
+            <label style="font-size:.82rem;font-weight:750">Document type</label>
+            <select id="toolDocType" style="padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#0d0e10;color:var(--text)">
+              <option value="aadhaar">Aadhaar</option>
+              <option value="pan">PAN</option>
+              <option value="driver_license">Driver license</option>
+              <option value="passport">Passport</option>
+              <option value="visa">Visa</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+          <div class="field" style="display:grid;gap:6px">
+            <label style="font-size:.82rem;font-weight:750">Document number</label>
+            <input id="toolDocNumber" style="padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#0d0e10;color:var(--text)" />
+          </div>
+          <button class="primary-btn" id="toolVerifyBtn" type="button" style="width:fit-content">Verify Document</button>
+          <pre id="toolResult" style="white-space:pre-wrap;color:var(--muted);font-size:.85rem"></pre>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" style="margin-top: 20px;">
+      <div class="card-header">
         <h3>Recent audit log</h3>
       </div>
       <div class="card-body">
@@ -236,9 +263,11 @@
     function renderStats(stats = {}) {
       const cards = [
         { icon: '🚗', value: stats.bookings ?? 0, label: 'Bookings this month', tone: 'orange' },
+        { icon: '✅', value: stats.approvedBookings ?? 0, label: 'Approved bookings', tone: 'green' },
         { icon: '👥', value: stats.customers ?? 0, label: 'Customers', tone: 'green' },
         { icon: '🔔', value: stats.enquiries ?? 0, label: 'Pending approvals', tone: 'blue' },
         { icon: '🧾', value: stats.documentChecks ?? 0, label: 'Docs under review', tone: 'red' },
+        { icon: '🛡️', value: stats.verifiedDocuments ?? 0, label: 'Verified documents', tone: 'blue' },
       ];
       statsGrid.innerHTML = cards.map(card => `
         <div class="stat-card">
@@ -322,8 +351,10 @@
             Submitted: ${escapeHtml(formatDate(item.submittedAt))}
           </div>
           <div class="doc-actions">
+            ${item.fileName ? `<a class="mini-btn" href="/api/documents/${item.id}/file" target="_blank" rel="noopener">View file</a>` : ''}
             <button class="mini-btn success" type="button" data-doc-action="verified" data-verification-id="${item.id}" data-booking-id="${item.bookingId}">Verify</button>
             <button class="mini-btn danger" type="button" data-doc-action="rejected" data-verification-id="${item.id}" data-booking-id="${item.bookingId}">Reject</button>
+            <button class="mini-btn" type="button" data-doc-action="reupload_requested" data-verification-id="${item.id}" data-booking-id="${item.bookingId}">Request re-upload</button>
           </div>
         </div>
       `).join('');
@@ -361,7 +392,7 @@
           body: JSON.stringify({ id: bookingId, status, remark }),
           credentials: 'same-origin'
         });
-        const result = await response.json();
+        const result = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(result.error || 'Unable to update booking status.');
         await loadDashboard();
       } catch (error) {
@@ -377,7 +408,7 @@
           body: JSON.stringify({ verificationId, bookingId, status, remark }),
           credentials: 'same-origin'
         });
-        const result = await response.json();
+        const result = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(result.error || 'Unable to update verification status.');
         await loadDashboard();
       } catch (error) {
@@ -392,8 +423,8 @@
           fetch('/api/admin/document-verifications', { credentials: 'same-origin' })
         ]);
 
-        const dashboardData = dashboardRes.ok ? await dashboardRes.json() : { stats: {}, bookings: [] };
-        const verificationData = verificationRes.ok ? await verificationRes.json() : { rows: [], logs: [] };
+        const dashboardData = dashboardRes.ok ? await dashboardRes.json().catch(() => ({})) : { stats: {}, bookings: [] };
+        const verificationData = verificationRes.ok ? await verificationRes.json().catch(() => ({})) : { rows: [], logs: [] };
 
         if (!dashboardRes.ok) throw new Error(dashboardData.error || 'Unable to load admin dashboard.');
         if (!verificationRes.ok) throw new Error(verificationData.error || 'Unable to load verification queue.');
@@ -414,9 +445,31 @@
     document.getElementById('openClientPortal').addEventListener('click', () => {
       window.location.href = '/Client/dashboard.html';
     });
-    document.getElementById('logoutBtn').addEventListener('click', () => {
+    document.getElementById('logoutBtn').addEventListener('click', async () => {
+      try { await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' }); } catch (error) {}
       document.cookie = 'travlish_session=; Max-Age=0; path=/';
       window.location.href = '/Admin/login.html';
+    });
+
+    document.getElementById('toolVerifyBtn').addEventListener('click', async () => {
+      const resultBox = document.getElementById('toolResult');
+      resultBox.textContent = 'Verifying...';
+      try {
+        const response = await fetch('/api/admin/document-verification-tool', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            documentType: document.getElementById('toolDocType').value,
+            documentNumber: document.getElementById('toolDocNumber').value
+          }),
+          credentials: 'same-origin'
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.error || 'Verification failed.');
+        resultBox.textContent = JSON.stringify(result, null, 2);
+      } catch (error) {
+        resultBox.textContent = error.message;
+      }
     });
 
     loadDashboard();

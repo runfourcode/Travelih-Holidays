@@ -148,6 +148,18 @@ footer{border-top:1px solid var(--line);padding:28px 0;background:#090a0b}
   </div>
 </section>
 
+<section class="section" id="showcase">
+  <div class="container">
+    <div class="section-heading">
+      <span class="eyebrow">Our Fleet Showcase</span>
+      <h2>Premium cars for every journey</h2>
+      <p>Browse our collection. Sign in to enquire or book a vehicle.</p>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px">
+      <img src="/Assets/Photos/WhatsApp Image 2026-10-11 at 10.20.01 AM.jpeg" alt="Fleet photo" loading="lazy" style="width:100%;height:180px;object-fit:cover;border-radius:14px;border:1px solid rgba(255,255,255,.09)"><img src="/Assets/Photos/WhatsApp Image 2026-10-11 at 10.20.01 AM (1).jpeg" alt="Fleet photo" loading="lazy" style="width:100%;height:180px;object-fit:cover;border-radius:14px;border:1px solid rgba(255,255,255,.09)"><img src="/Assets/Photos/WhatsApp Image 2026-10-12 at 12.01.34 AM.jpeg" alt="Fleet photo" loading="lazy" style="width:100%;height:180px;object-fit:cover;border-radius:14px;border:1px solid rgba(255,255,255,.09)"><img src="/Assets/Photos/WhatsApp Image 2026-10-12 at 12.01.34 AM (1).jpeg" alt="Fleet photo" loading="lazy" style="width:100%;height:180px;object-fit:cover;border-radius:14px;border:1px solid rgba(255,255,255,.09)"><img src="/Assets/Photos/WhatsApp Image 2026-10-12 at 12.01.34 AM (2).jpeg" alt="Fleet photo" loading="lazy" style="width:100%;height:180px;object-fit:cover;border-radius:14px;border:1px solid rgba(255,255,255,.09)"><img src="/Assets/Photos/WhatsApp Image 2026-10-12 at 12.01.34 AM (3).jpeg" alt="Fleet photo" loading="lazy" style="width:100%;height:180px;object-fit:cover;border-radius:14px;border:1px solid rgba(255,255,255,.09)"><img src="/Assets/Photos/WhatsApp Image 2026-10-13 at 9.45.43 AM.jpeg" alt="Fleet photo" loading="lazy" style="width:100%;height:180px;object-fit:cover;border-radius:14px;border:1px solid rgba(255,255,255,.09)"><img src="/Assets/Photos/WhatsApp Image 2026-10-13 at 9.45.43 AM (1).jpeg" alt="Fleet photo" loading="lazy" style="width:100%;height:180px;object-fit:cover;border-radius:14px;border:1px solid rgba(255,255,255,.09)"><img src="/Assets/Photos/WhatsApp Image 2026-10-13 at 9.45.43 AM (2).jpeg" alt="Fleet photo" loading="lazy" style="width:100%;height:180px;object-fit:cover;border-radius:14px;border:1px solid rgba(255,255,255,.09)">
+    </div>
+  </div>
+</section>
 <section class="rate-section" id="cars">
   <div class="rate-container">
     <div class="rate-heading">
@@ -297,7 +309,7 @@ document.getElementById("bookingForm").addEventListener("submit", async function
       body: JSON.stringify(Object.fromEntries(form)),
       credentials: "same-origin"
     });
-    const result = await response.json();
+    const result = await response.json().catch(() => ({}));
     if (!response.ok) {
       if (response.status === 401) {
         status.textContent = "Please log in as a client before booking a vehicle.";
@@ -314,6 +326,25 @@ document.getElementById("bookingForm").addEventListener("submit", async function
     status.textContent = error.message;
   }
 });
+</script>
+
+<script>
+(async function(){
+  try {
+    const res = await fetch('/api/me', { credentials: 'same-origin' });
+    const data = await res.json().catch(() => ({}));
+    const isClient = data && data.user && data.user.role === 'client';
+    if (!isClient) {
+      const status = document.getElementById('status');
+      if (status) status.textContent = 'Please sign in as a client to enquire or book a vehicle.';
+      document.querySelectorAll('[data-car]').forEach(btn => { btn.disabled = true; btn.textContent = 'Sign in to enquire'; btn.addEventListener('click', () => { window.location.href = '/Client/login.html'; }); });
+      const carSelect = document.getElementById('car');
+      if (carSelect) carSelect.disabled = true;
+      const bookingBtn = document.querySelector('#bookingForm button[type="submit"]');
+      if (bookingBtn) { bookingBtn.disabled = true; bookingBtn.textContent = 'Sign in to book'; }
+    }
+  } catch (e) {}
+})();
 </script>
 </body>
 </html>

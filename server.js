@@ -13,6 +13,7 @@ loadEnvFile();
 const PORT = Number(process.env.PORT || 3000);
 const DATA_DIR = path.join(ROOT, "data");
 const DATABASE_PATH = process.env.DATABASE_PATH || path.join(DATA_DIR, "travlish.sqlite");
+const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(DATA_DIR, "uploads");
 const SESSION_DAYS = 7;
 const MAX_BODY_BYTES = 32 * 1024;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -52,21 +53,36 @@ db.exec(`
     duration TEXT,
     notes TEXT,
     status TEXT NOT NULL DEFAULT 'pending'
-      CHECK (status IN ('pending', 'confirmed', 'completed', 'cancelled')),
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      CHECK (status IN ('pending', 'submitted', 'approved', 'rejected', 'documents_required', 'documents_submitted', 'under_review', 'verified', 'verification_failed', 'confirmed', 'completed', 'cancelled')),
+    approved_by INTEGER REFERENCES users(id),
+    approved_at TEXT,
+    rejected_reason TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
   CREATE TABLE IF NOT EXISTS document_verifications (
     id INTEGER PRIMARY KEY,
     booking_id INTEGER NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    document_type TEXT NOT NULL CHECK (document_type IN ('aadhaar', 'pan', 'driver_license', 'passport')),
+    document_type TEXT NOT NULL CHECK (document_type IN ('aadhaar', 'pan', 'driver_license', 'passport', 'visa', 'other')),
     document_number TEXT NOT NULL,
+    masked_number TEXT,
     document_name TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'submitted' CHECK (status IN ('submitted', 'under_review', 'verified', 'rejected')),
+    file_path TEXT,
+    file_name TEXT,
+    file_mime TEXT,
+    file_size INTEGER,
+    status TEXT NOT NULL DEFAULT 'submitted' CHECK (status IN ('submitted', 'under_review', 'verified', 'rejected', 'reupload_requested')),
     verification_result TEXT,
+    admin_notes TEXT,
+    provider TEXT,
+    provider_reference TEXT,
+    verified_name TEXT,
     verified_by INTEGER REFERENCES users(id),
     submitted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    reviewed_at TEXT
+    reviewed_at TEXT,
+    verified_at TEXT,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
   CREATE TABLE IF NOT EXISTS verification_logs (
     id INTEGER PRIMARY KEY,
@@ -82,8 +98,34 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS bookings_created_idx ON bookings(created_at DESC);
   CREATE INDEX IF NOT EXISTS verification_booking_idx ON document_verifications(booking_id);
   CREATE INDEX IF NOT EXISTS verification_logs_booking_idx ON verification_logs(booking_id);
+  CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    booking_id INTEGER REFERENCES bookings(id) ON DELETE CASCADE,
+    document_id INTEGER REFERENCES document_verifications(id) ON DELETE CASCADE,
+    type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    message TEXT NOT NULL,
+    is_read INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE TABLE IF NOT EXISTS verification_attempts (
+    id INTEGER PRIMARY KEY,
+    booking_id INTEGER REFERENCES bookings(id) ON DELETE CASCADE,
+    verification_id INTEGER REFERENCES document_verifications(id) ON DELETE CASCADE,
+    document_type TEXT NOT NULL,
+    masked_document_number TEXT,
+    provider TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('success', 'failed', 'unavailable')),
+    provider_reference TEXT,
+    verified_name TEXT,
+    details TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE INDEX IF NOT EXISTS notifications_user_idx ON notifications(user_id, created_at DESC);
 `);
 
+migrateSchema();
 seedAdminFromEnvironment();
 
 const statements = {
@@ -108,20 +150,23 @@ const statements = {
   `),
   listBookings: db.prepare(`
     SELECT id, user_id AS userId, car, customer, phone, email, pickup_date AS pickupDate,
-      handover, pickup, destination, duration, notes, status, created_at AS createdAt
+      handover, pickup, destination, duration, notes, status, approved_by AS approvedBy,
+      approved_at AS approvedAt, rejected_reason AS rejectedReason, created_at AS createdAt, updated_at AS updatedAt
     FROM bookings ORDER BY created_at DESC, id DESC LIMIT 500
   `),
-  getBooking: db.prepare("SELECT id, user_id AS userId, status FROM bookings WHERE id = ?"),
-  setBookingStatus: db.prepare("UPDATE bookings SET status = ? WHERE id = ?"),
+  getBooking: db.prepare("SELECT id, user_id AS userId, status, approved_by AS approvedBy, approved_at AS approvedAt FROM bookings WHERE id = ?"),
+  setBookingStatus: db.prepare("UPDATE bookings SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?"),
   insertVerification: db.prepare(`
     INSERT INTO document_verifications
-      (booking_id, user_id, document_type, document_number, document_name, status, verification_result, verified_by, reviewed_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (booking_id, user_id, document_type, document_number, masked_number, document_name, file_path, file_name, file_mime, file_size, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `),
   listVerificationsForBooking: db.prepare(`
     SELECT id, booking_id AS bookingId, user_id AS userId, document_type AS documentType,
-      document_number AS documentNumber, document_name AS documentName, status, verification_result AS verificationResult,
-      verified_by AS verifiedBy, submitted_at AS submittedAt, reviewed_at AS reviewedAt
+      document_number AS documentNumber, masked_number AS maskedNumber, document_name AS documentName,
+      file_name AS fileName, file_mime AS fileMime, file_size AS fileSize, status, verification_result AS verificationResult,
+      admin_notes AS adminNotes, provider, provider_reference AS providerReference, verified_name AS verifiedName,
+      verified_by AS verifiedBy, submitted_at AS submittedAt, reviewed_at AS reviewedAt, verified_at AS verifiedAt
     FROM document_verifications WHERE booking_id = ? ORDER BY submitted_at DESC, id DESC
   `),
   createVerificationLog: db.prepare(`
@@ -133,7 +178,153 @@ const statements = {
       event, details, created_at AS createdAt
     FROM verification_logs WHERE booking_id = ? ORDER BY created_at DESC, id DESC LIMIT 200
   `),
+  getVerification: db.prepare(`
+    SELECT id, booking_id AS bookingId, user_id AS userId, document_type AS documentType,
+      document_number AS documentNumber, masked_number AS maskedNumber, document_name AS documentName,
+      file_path AS filePath, file_name AS fileName, file_mime AS fileMime, file_size AS fileSize, status,
+      verification_result AS verificationResult, admin_notes AS adminNotes, provider, provider_reference AS providerReference,
+      verified_name AS verifiedName, verified_by AS verifiedBy, submitted_at AS submittedAt, reviewed_at AS reviewedAt,
+      verified_at AS verifiedAt
+    FROM document_verifications WHERE id = ?
+  `),
+  listAllVerifications: db.prepare(`
+    SELECT v.id, v.booking_id AS bookingId, b.car, u.name AS customerName, u.email AS customerEmail,
+      v.document_type AS documentType, v.document_number AS documentNumber, v.masked_number AS maskedNumber,
+      v.document_name AS documentName, v.file_name AS fileName, v.status, v.verification_result AS verificationResult,
+      v.admin_notes AS adminNotes, v.provider, v.provider_reference AS providerReference, v.verified_name AS verifiedName,
+      v.submitted_at AS submittedAt, v.reviewed_at AS reviewedAt, v.verified_at AS verifiedAt
+    FROM document_verifications v
+    JOIN bookings b ON b.id = v.booking_id
+    JOIN users u ON u.id = v.user_id
+    ORDER BY v.submitted_at DESC, v.id DESC LIMIT 500
+  `),
+  updateVerification: db.prepare(`
+    UPDATE document_verifications
+    SET status = ?, verification_result = ?, admin_notes = ?, verified_by = ?, reviewed_at = ?, verified_at = ?, provider = ?, provider_reference = ?, verified_name = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `),
+  createNotification: db.prepare(`
+    INSERT INTO notifications (user_id, booking_id, document_id, type, title, message)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `),
+  listNotifications: db.prepare(`
+    SELECT id, user_id AS userId, booking_id AS bookingId, document_id AS documentId, type, title, message,
+      is_read AS isRead, created_at AS createdAt
+    FROM notifications WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 100
+  `),
+  markNotificationRead: db.prepare("UPDATE notifications SET is_read = 1 WHERE id = ? AND user_id = ?"),
+  createVerificationAttempt: db.prepare(`
+    INSERT INTO verification_attempts (booking_id, verification_id, document_type, masked_document_number, provider, status, provider_reference, verified_name, details)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `),
+  listVerificationAttempts: db.prepare(`
+    SELECT id, booking_id AS bookingId, verification_id AS verificationId, document_type AS documentType,
+      masked_document_number AS maskedDocumentNumber, provider, status, provider_reference AS providerReference,
+      verified_name AS verifiedName, details, created_at AS createdAt
+    FROM verification_attempts WHERE booking_id = ? ORDER BY created_at DESC, id DESC LIMIT 100
+  `),
 };
+
+function tableColumns(table) {
+  return db.prepare(`PRAGMA table_info(${table})`).all().map((column) => column.name);
+}
+
+function migrateSchema() {
+  const bookingColumns = tableColumns("bookings");
+  if (!bookingColumns.includes("approved_by")) {
+    db.exec(`
+      CREATE TABLE bookings_new (
+        id INTEGER PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        car TEXT NOT NULL,
+        customer TEXT NOT NULL,
+        phone TEXT NOT NULL,
+        email TEXT,
+        pickup_date TEXT NOT NULL,
+        handover TEXT NOT NULL,
+        pickup TEXT NOT NULL,
+        destination TEXT NOT NULL,
+        duration TEXT,
+        notes TEXT,
+        status TEXT NOT NULL DEFAULT 'pending'
+          CHECK (status IN ('pending', 'submitted', 'approved', 'rejected', 'documents_required', 'documents_submitted', 'under_review', 'verified', 'verification_failed', 'confirmed', 'completed', 'cancelled')),
+        approved_by INTEGER REFERENCES users(id),
+        approved_at TEXT,
+        rejected_reason TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      INSERT INTO bookings_new (id, user_id, car, customer, phone, email, pickup_date, handover, pickup, destination, duration, notes, status, created_at)
+        SELECT id, user_id, car, customer, phone, email, pickup_date, handover, pickup, destination, duration, notes, status, created_at FROM bookings;
+      DROP TABLE bookings;
+      ALTER TABLE bookings_new RENAME TO bookings;
+    `);
+    db.exec("CREATE INDEX IF NOT EXISTS bookings_created_idx ON bookings(created_at DESC);");
+  }
+
+  const documentColumns = tableColumns("document_verifications");
+  if (!documentColumns.includes("file_path")) {
+    db.exec(`
+      CREATE TABLE document_verifications_new (
+        id INTEGER PRIMARY KEY,
+        booking_id INTEGER NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        document_type TEXT NOT NULL CHECK (document_type IN ('aadhaar', 'pan', 'driver_license', 'passport', 'visa', 'other')),
+        document_number TEXT NOT NULL,
+        masked_number TEXT,
+        document_name TEXT NOT NULL,
+        file_path TEXT,
+        file_name TEXT,
+        file_mime TEXT,
+        file_size INTEGER,
+        status TEXT NOT NULL DEFAULT 'submitted' CHECK (status IN ('submitted', 'under_review', 'verified', 'rejected', 'reupload_requested')),
+        verification_result TEXT,
+        admin_notes TEXT,
+        provider TEXT,
+        provider_reference TEXT,
+        verified_name TEXT,
+        verified_by INTEGER REFERENCES users(id),
+        submitted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        reviewed_at TEXT,
+        verified_at TEXT,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      INSERT INTO document_verifications_new (id, booking_id, user_id, document_type, document_number, document_name, status, verification_result, verified_by, submitted_at, reviewed_at)
+        SELECT id, booking_id, user_id, document_type, document_number, document_name, status, verification_result, verified_by, submitted_at, reviewed_at FROM document_verifications;
+      DROP TABLE document_verifications;
+      ALTER TABLE document_verifications_new RENAME TO document_verifications;
+    `);
+    db.exec("CREATE INDEX IF NOT EXISTS verification_booking_idx ON document_verifications(booking_id);");
+  }
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS notifications (
+      id INTEGER PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      booking_id INTEGER REFERENCES bookings(id) ON DELETE CASCADE,
+      document_id INTEGER REFERENCES document_verifications(id) ON DELETE CASCADE,
+      type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      message TEXT NOT NULL,
+      is_read INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS verification_attempts (
+      id INTEGER PRIMARY KEY,
+      booking_id INTEGER REFERENCES bookings(id) ON DELETE CASCADE,
+      verification_id INTEGER REFERENCES document_verifications(id) ON DELETE CASCADE,
+      document_type TEXT NOT NULL,
+      masked_document_number TEXT,
+      provider TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('success', 'failed', 'unavailable')),
+      provider_reference TEXT,
+      verified_name TEXT,
+      details TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS notifications_user_idx ON notifications(user_id, created_at DESC);
+  `);
+}
 
 const sessionsCookie = "travlish_session";
 const loginAttempts = new Map();
@@ -204,6 +395,34 @@ const server = http.createServer(async (request, response) => {
       const user = requireClient(request, response);
       if (!user) return;
       return await submitClientVerification(request, response, user);
+    }
+
+    if (request.method === "GET" && pathname === "/api/client/notifications") {
+      const user = requireClient(request, response);
+      if (!user) return;
+      return sendJson(response, 200, { items: statements.listNotifications.all(user.id) });
+    }
+
+    if (request.method === "POST" && pathname.startsWith("/api/client/notifications/") && pathname.endsWith("/read")) {
+      const user = requireClient(request, response);
+      if (!user) return;
+      const id = Number(pathname.split("/")[4]);
+      if (!Number.isSafeInteger(id) || id < 1) return sendJson(response, 400, { error: "Invalid notification id." });
+      statements.markNotificationRead.run(id, user.id);
+      return sendJson(response, 200, { id, read: true });
+    }
+
+    if (request.method === "POST" && pathname === "/api/admin/document-verification-tool") {
+      if (!requireAdmin(request, response)) return;
+      return await runDocumentVerificationTool(request, response);
+    }
+
+    if (request.method === "GET" && pathname.startsWith("/api/documents/") && pathname.endsWith("/file")) {
+      const user = getSessionUser(request);
+      if (!user) return sendJson(response, 401, { error: "Sign-in is required." });
+      const id = Number(pathname.split("/")[3]);
+      if (!Number.isSafeInteger(id) || id < 1) return sendJson(response, 400, { error: "Invalid document id." });
+      return await serveDocumentFile(request, response, user, id);
     }
 
     if (request.method === "POST" && pathname.startsWith("/api/admin/document-verifications/")) {
@@ -412,6 +631,67 @@ async function readForm(request) {
   }
 }
 
+function maskDocumentNumber(value) {
+  const cleaned = String(value || "").replace(/\s+/g, "");
+  if (cleaned.length <= 4) return cleaned;
+  return `${"*".repeat(Math.max(0, cleaned.length - 4))}${cleaned.slice(-4)}`;
+}
+
+async function parseMultipart(request) {
+  const contentType = request.headers["content-type"] || "";
+  const boundaryMatch = contentType.match(/boundary=(?:"([^"]+)"|([^;]+))/i);
+  const boundary = boundaryMatch ? (boundaryMatch[1] || boundaryMatch[2] || "").trim() : "";
+  if (!boundary) throw Object.assign(new Error("Multipart boundary is missing."), { statusCode: 400 });
+
+  const chunks = [];
+  let bytes = 0;
+  for await (const chunk of request) {
+    bytes += chunk.length;
+    if (bytes > MAX_BODY_BYTES) throw Object.assign(new Error("Request body is too large."), { statusCode: 413 });
+    chunks.push(chunk);
+  }
+  const buffer = Buffer.concat(chunks);
+  const delimiter = Buffer.from(`--${boundary}`);
+  const parts = [];
+  let cursor = buffer.indexOf(delimiter);
+  while (cursor !== -1) {
+    const next = buffer.indexOf(delimiter, cursor + delimiter.length);
+    if (next === -1) break;
+    const part = buffer.slice(cursor + delimiter.length, next);
+    const headerEnd = part.indexOf("\r\n\r\n");
+    if (headerEnd !== -1) {
+      const headerText = part.slice(0, headerEnd).toString("utf8");
+      let content = part.slice(headerEnd + 4);
+      if (content.length >= 2 && content[content.length - 2] === 0x0d && content[content.length - 1] === 0x0a) {
+        content = content.slice(0, -2);
+      }
+      parts.push({ headerText, content });
+    }
+    cursor = next;
+  }
+
+  const fields = {};
+  const files = [];
+  for (const part of parts) {
+    const nameMatch = part.headerText.match(/name="([^"]+)"/);
+    if (!nameMatch) continue;
+    const name = nameMatch[1];
+    const filenameMatch = part.headerText.match(/filename="([^"]*)"/);
+    if (filenameMatch && filenameMatch[1]) {
+      const mimeMatch = part.headerText.match(/Content-Type:\s*([^\r\n]+)/i);
+      files.push({
+        fieldname: name,
+        filename: filenameMatch[1],
+        mimetype: mimeMatch ? mimeMatch[1].trim() : "application/octet-stream",
+        data: part.content,
+      });
+    } else {
+      fields[name] = part.content.toString("utf8");
+    }
+  }
+  return { fields, files };
+}
+
 async function login(request, response, requiredRole) {
   const body = await readForm(request);
   const email = String(body.email || "").trim().toLowerCase();
@@ -547,8 +827,11 @@ async function createBooking(request, response) {
   );
   const bookingId = Number(inserted.lastInsertRowid);
   statements.createVerificationLog.run(bookingId, null, "client", user.id, "booking_submitted", `Booking request created for ${String(fields.car).trim()} by ${user.email}`);
+  statements.createNotification.run(user.id, bookingId, null, "booking_submitted", "Booking submitted", "Your booking request has been submitted successfully.");
   return sendJson(response, 201, { id: bookingId, status: "pending" });
 }
+
+const ALLOWED_BOOKING_STATUSES = ["pending", "submitted", "approved", "rejected", "documents_required", "documents_submitted", "under_review", "verified", "verification_failed", "confirmed", "completed", "cancelled"];
 
 async function updateBookingStatus(request, response) {
   const admin = requireAdmin(request, response);
@@ -556,14 +839,32 @@ async function updateBookingStatus(request, response) {
   const body = await readBody(request);
   const id = Number(body.id);
   const status = String(body.status || "");
+  const remark = String(body.remark || "");
   if (!Number.isSafeInteger(id) || id < 1) return sendJson(response, 400, { error: "Invalid booking id." });
-  if (!["pending", "confirmed", "completed", "cancelled"].includes(status)) {
+  if (!ALLOWED_BOOKING_STATUSES.includes(status)) {
     return sendJson(response, 400, { error: "Choose a valid booking status." });
   }
   const booking = statements.getBooking.get(id);
   if (!booking) return sendJson(response, 404, { error: "Booking not found." });
-  statements.setBookingStatus.run(status, id);
-  statements.createVerificationLog.run(id, null, "admin", admin.id, "booking_status_updated", `Booking status changed to ${status}`);
+
+  if (status === "approved") {
+    db.prepare("UPDATE bookings SET status = ?, approved_by = ?, approved_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(status, admin.id, id);
+  } else if (status === "rejected") {
+    db.prepare("UPDATE bookings SET status = ?, rejected_reason = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(status, remark || null, id);
+  } else {
+    statements.setBookingStatus.run(status, id);
+  }
+
+  statements.createVerificationLog.run(id, null, "admin", admin.id, "booking_status_updated", `Booking status changed to ${status}${remark ? `: ${remark}` : ""}`);
+
+  if (booking.userId) {
+    if (status === "approved") {
+      statements.createNotification.run(booking.userId, id, null, "booking_approved", "Booking approved", "Your booking request has been approved. Please submit your documents for verification.");
+    } else if (status === "rejected") {
+      statements.createNotification.run(booking.userId, id, null, "booking_rejected", "Booking rejected", remark || "Your booking request could not be approved.");
+    }
+  }
+
   return sendJson(response, 200, { id, status });
 }
 
@@ -583,6 +884,9 @@ function getDashboardData() {
   const pendingDocumentCount = db.prepare(`
     SELECT COUNT(*) AS count FROM document_verifications WHERE status IN ('submitted', 'under_review')
   `).get().count;
+  const approvedBookings = db.prepare("SELECT COUNT(*) AS count FROM bookings WHERE status = 'approved'").get().count;
+  const verifiedDocuments = db.prepare("SELECT COUNT(*) AS count FROM document_verifications WHERE status = 'verified'").get().count;
+  const failedVerifications = db.prepare("SELECT COUNT(*) AS count FROM document_verifications WHERE status = 'rejected'").get().count;
   return {
     bookings,
     stats: {
@@ -591,7 +895,10 @@ function getDashboardData() {
       customers: Number(customers),
       fleet: 7,
       enquiries: Number(statusCounts.find(item => item.status === "pending")?.count || 0),
+      approvedBookings: Number(approvedBookings),
       documentChecks: Number(pendingDocumentCount),
+      verifiedDocuments: Number(verifiedDocuments),
+      failedVerifications: Number(failedVerifications),
       documentTypes: verificationRows,
     },
   };
@@ -600,27 +907,23 @@ function getDashboardData() {
 function getClientDashboardData(user) {
   const bookings = db.prepare(`
     SELECT id, car, customer, phone, email, pickup_date AS pickupDate,
-      handover, pickup, destination, duration, notes, status, created_at AS createdAt
+      handover, pickup, destination, duration, notes, status, approved_by AS approvedBy,
+      approved_at AS approvedAt, rejected_reason AS rejectedReason, created_at AS createdAt, updated_at AS updatedAt
     FROM bookings WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 100
   `).all(user.id);
   const documents = db.prepare(`
     SELECT id, booking_id AS bookingId, document_type AS documentType, document_number AS documentNumber,
-      document_name AS documentName, status, verification_result AS verificationResult, submitted_at AS submittedAt
+      masked_number AS maskedNumber, document_name AS documentName, file_name AS fileName, status,
+      verification_result AS verificationResult, admin_notes AS adminNotes, provider, provider_reference AS providerReference,
+      verified_name AS verifiedName, submitted_at AS submittedAt, reviewed_at AS reviewedAt, verified_at AS verifiedAt
     FROM document_verifications WHERE user_id = ? ORDER BY submitted_at DESC, id DESC
   `).all(user.id);
-  return { bookings, documents, user: { name: user.name, email: user.email, role: user.role } };
+  const notifications = statements.listNotifications.all(user.id);
+  return { bookings, documents, notifications, user: { name: user.name, email: user.email, role: user.role } };
 }
 
 function getAdminVerificationData() {
-  const rows = db.prepare(`
-    SELECT v.id, v.booking_id AS bookingId, b.car, u.name AS customerName, u.email AS customerEmail,
-      v.document_type AS documentType, v.document_number AS documentNumber, v.document_name AS documentName,
-      v.status, v.verification_result AS verificationResult, v.submitted_at AS submittedAt
-    FROM document_verifications v
-    JOIN bookings b ON b.id = v.booking_id
-    JOIN users u ON u.id = v.user_id
-    ORDER BY v.submitted_at DESC, v.id DESC LIMIT 200
-  `).all();
+  const rows = statements.listAllVerifications.all();
   const logs = db.prepare(`
     SELECT booking_id AS bookingId, verification_id AS verificationId, actor_role AS actorRole,
       event, details, created_at AS createdAt FROM verification_logs ORDER BY created_at DESC LIMIT 200
@@ -629,37 +932,82 @@ function getAdminVerificationData() {
 }
 
 async function submitClientVerification(request, response, user) {
-  const body = await readBody(request);
+  const contentType = request.headers["content-type"] || "";
+  let body = {};
+  let uploadedFile = null;
+  if (contentType.includes("multipart/form-data")) {
+    const parsed = await parseMultipart(request);
+    body = parsed.fields || {};
+    uploadedFile = parsed.files && parsed.files.length ? parsed.files[0] : null;
+  } else {
+    body = await readBody(request);
+  }
+
   const bookingId = Number(body.bookingId);
   const documentType = String(body.documentType || "");
   const documentNumber = String(body.documentNumber || "");
-  const documentName = String(body.documentName || "");
+  const documentName = String(body.documentName || body.fileName || "");
   if (!Number.isSafeInteger(bookingId) || bookingId < 1) {
     return sendJson(response, 400, { error: "Invalid booking id." });
   }
-  if (!['aadhaar', 'pan', 'driver_license', 'passport'].includes(documentType)) {
+  if (!['aadhaar', 'pan', 'driver_license', 'passport', 'visa', 'other'].includes(documentType)) {
     return sendJson(response, 400, { error: "Choose a supported document type." });
   }
-  if (!documentNumber.trim() || !documentName.trim()) {
-    return sendJson(response, 400, { error: "Document number and file name are required." });
+  if (!documentNumber.trim()) {
+    return sendJson(response, 400, { error: "Document number is required." });
   }
+
   const booking = db.prepare("SELECT id, user_id FROM bookings WHERE id = ?").get(bookingId);
   if (!booking || booking.user_id !== user.id) {
     return sendJson(response, 404, { error: "Booking not found for this account." });
   }
+
+  let filePath = null;
+  let fileName = null;
+  let fileMime = null;
+  let fileSize = null;
+  if (uploadedFile) {
+    const allowedMimes = ["application/pdf", "image/jpeg", "image/jpg", "image/png"];
+    if (!allowedMimes.includes(String(uploadedFile.mimetype || "").toLowerCase())) {
+      return sendJson(response, 400, { error: "Unsupported file type. Use PDF, JPG, JPEG, or PNG." });
+    }
+    if (uploadedFile.data.length > 5 * 1024 * 1024) {
+      return sendJson(response, 400, { error: "File is too large. Maximum size is 5 MB." });
+    }
+    fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+    const safeName = `${randomBytes(16).toString("hex")}${path.extname(uploadedFile.filename || "")}`;
+    filePath = path.join(UPLOAD_DIR, safeName);
+    fs.writeFileSync(filePath, uploadedFile.data);
+    fileName = uploadedFile.filename || safeName;
+    fileMime = uploadedFile.mimetype;
+    fileSize = uploadedFile.data.length;
+  }
+
+  const masked = maskDocumentNumber(documentNumber.trim());
+  const finalName = documentName.trim() || fileName || "Document";
   const submitted = statements.insertVerification.run(
     bookingId,
     user.id,
     documentType,
     documentNumber.trim(),
-    documentName.trim(),
-    "submitted",
-    null,
-    null,
-    null
+    masked,
+    finalName,
+    filePath,
+    fileName,
+    fileMime,
+    fileSize,
+    "submitted"
   );
   const verificationId = Number(submitted.lastInsertRowid);
   statements.createVerificationLog.run(bookingId, verificationId, "client", user.id, "document_submitted", `Submitted ${documentType} document for verification`);
+  statements.createNotification.run(user.id, bookingId, verificationId, "document_submitted", "Document submitted", "Your document has been submitted and is under review.");
+
+  // Notify admins
+  const admins = db.prepare("SELECT id FROM users WHERE role = 'admin'").all();
+  for (const admin of admins) {
+    statements.createNotification.run(admin.id, bookingId, verificationId, "document_submitted_admin", "New document submitted", `A new ${documentType} document was submitted for booking #${bookingId}.`);
+  }
+
   return sendJson(response, 201, { id: verificationId, status: "submitted" });
 }
 
@@ -671,35 +1019,178 @@ async function verifyDocumentSubmission(request, response) {
   const bookingId = Number(body.bookingId);
   const status = String(body.status || "");
   const remark = String(body.remark || "");
+  const verifiedName = String(body.verifiedName || "").trim() || null;
+  const providerReference = String(body.providerReference || "").trim() || null;
+  const provider = String(body.provider || "").trim() || null;
   if (!Number.isSafeInteger(verificationId) || verificationId < 1) {
     return sendJson(response, 400, { error: "Invalid verification id." });
   }
-  if (!['submitted', 'under_review', 'verified', 'rejected'].includes(status)) {
+  if (!['submitted', 'under_review', 'verified', 'rejected', 'reupload_requested'].includes(status)) {
     return sendJson(response, 400, { error: "Choose a valid verification status." });
   }
-  const verification = db.prepare(`
-    SELECT id, booking_id AS bookingId, user_id AS userId, document_type AS documentType, document_name AS documentName
-    FROM document_verifications WHERE id = ?
-  `).get(verificationId);
+  const verification = statements.getVerification.get(verificationId);
   if (!verification || Number(verification.bookingId) !== bookingId) {
     return sendJson(response, 404, { error: "Verification record not found." });
   }
+
   const reviewedAt = new Date().toISOString();
-  db.prepare(`
-    UPDATE document_verifications
-    SET status = ?, verification_result = ?, verified_by = ?, reviewed_at = ?
-    WHERE id = ?
-  `).run(status, remark || null, admin.id, reviewedAt, verificationId);
+  const verifiedAt = status === "verified" ? reviewedAt : null;
+  statements.updateVerification.run(
+    status,
+    remark || null,
+    remark || null,
+    admin.id,
+    reviewedAt,
+    verifiedAt,
+    provider,
+    providerReference,
+    verifiedName,
+    verificationId
+  );
+
   statements.createVerificationLog.run(bookingId, verificationId, "admin", admin.id, `document_${status}`, remark || 'No review note provided');
+
+  // Update booking status sensibly
+  if (status === "verified") {
+    db.prepare("UPDATE bookings SET status = 'verified', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(bookingId);
+  } else if (status === "reupload_requested" || status === "rejected") {
+    db.prepare("UPDATE bookings SET status = 'documents_required', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(bookingId);
+  }
+
+  if (verification.userId) {
+    let message = "Your document is under review.";
+    let title = "Document update";
+    if (status === "verified") { title = "Document verified"; message = "Your document has been successfully verified."; }
+    else if (status === "rejected") { title = "Document rejected"; message = remark || "Your document could not be verified. Please review the admin's instructions and submit again."; }
+    else if (status === "reupload_requested") { title = "Re-upload requested"; message = remark || "Please re-upload your document because additional verification is required."; }
+    else if (status === "under_review") { title = "Document under review"; message = "Your document has been submitted and is under review."; }
+    statements.createNotification.run(verification.userId, bookingId, verificationId, `document_${status}`, title, message);
+  }
+
   return sendJson(response, 200, { id: verificationId, bookingId, status });
+}
+
+async function runDocumentVerificationTool(request, response) {
+  const body = await readBody(request);
+  const documentType = String(body.documentType || "");
+  const documentNumber = String(body.documentNumber || "");
+  if (!['aadhaar', 'pan', 'driver_license', 'passport', 'visa', 'other'].includes(documentType)) {
+    return sendJson(response, 400, { error: "Choose a supported document type." });
+  }
+  if (!documentNumber.trim()) {
+    return sendJson(response, 400, { error: "Document number is required." });
+  }
+  const result = await verifyDocumentWithProvider({ documentType, documentNumber: documentNumber.trim() });
+  statements.createVerificationAttempt.run(null, null, documentType, maskDocumentNumber(documentNumber.trim()), result.provider, result.status, result.reference || null, result.verifiedName || null, result.message || result.details || null);
+  return sendJson(response, 200, result);
+}
+
+async function verifyDocumentWithProvider({ documentType, documentNumber }) {
+  const providerName = String(process.env.DOCUMENT_VERIFICATION_PROVIDER || "none").trim().toLowerCase();
+  if (!providerName || providerName === "none" || providerName === "manual") {
+    return {
+      provider: providerName || "none",
+      status: "unavailable",
+      message: "No legitimate verification provider is configured. Use manual verification workflow.",
+      reference: null,
+      verifiedName: null,
+      details: "Configure DOCUMENT_VERIFICATION_PROVIDER and related credentials to enable automated verification.",
+    };
+  }
+
+  if (providerName === "http") {
+    const url = process.env.DOCUMENT_VERIFICATION_API_URL;
+    const apiKey = process.env.DOCUMENT_VERIFICATION_API_KEY;
+    if (!url) {
+      return {
+        provider: "http",
+        status: "unavailable",
+        message: "Verification provider is not configured.",
+        reference: null,
+        verifiedName: null,
+        details: "Set DOCUMENT_VERIFICATION_API_URL.",
+      };
+    }
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+        },
+        body: JSON.stringify({ documentType, documentNumber }),
+      });
+      if (!res.ok) {
+        return {
+          provider: "http",
+          status: "failed",
+          message: "Verification could not be completed.",
+          reference: null,
+          verifiedName: null,
+          details: `Provider returned HTTP ${res.status}.`,
+        };
+      }
+      const data = await res.json().catch(() => ({}));
+      const verified = Boolean(data.verified || data.success || data.status === "verified");
+      return {
+        provider: "http",
+        status: verified ? "success" : "failed",
+        message: verified ? "Document verified successfully." : (data.message || "Verification failed."),
+        reference: data.reference || data.id || null,
+        verifiedName: data.name || data.verifiedName || null,
+        details: data.details || data.message || null,
+      };
+    } catch (error) {
+      return {
+        provider: "http",
+        status: "unavailable",
+        message: "Verification provider is unavailable.",
+        reference: null,
+        verifiedName: null,
+        details: "The verification request could not be completed.",
+      };
+    }
+  }
+
+  return {
+    provider: providerName,
+    status: "unavailable",
+    message: "Unsupported verification provider configuration.",
+    reference: null,
+    verifiedName: null,
+    details: "Use a supported provider or manual verification.",
+  };
+}
+
+async function serveDocumentFile(request, response, user, id) {
+  const verification = statements.getVerification.get(id);
+  if (!verification || !verification.filePath) {
+    return sendJson(response, 404, { error: "Document file not found." });
+  }
+  if (user.role !== "admin" && Number(verification.userId) !== user.id) {
+    return sendJson(response, 403, { error: "You are not authorized to view this document." });
+  }
+  if (!fs.existsSync(verification.filePath)) {
+    return sendJson(response, 404, { error: "Document file not found." });
+  }
+  const stat = fs.statSync(verification.filePath);
+  const mime = verification.fileMime || "application/octet-stream";
+  response.writeHead(200, {
+    "Content-Type": mime,
+    "Content-Length": stat.size,
+    "Content-Disposition": `inline; filename="${String(verification.fileName || "document").replace(/"/g, "")}"`,
+  });
+  fs.createReadStream(verification.filePath).pipe(response);
 }
 
 async function logout(request, response) {
   const token = parseCookies(request.headers.cookie)[sessionsCookie];
+  const user = token ? statements.findSession.get(token, Date.now()) : null;
   if (token) statements.deleteSession.run(token);
+  const redirect = user && user.role === "client" ? "/Client/login.html" : "/Admin/login.html";
   response.writeHead(303, {
     "Set-Cookie": `${sessionsCookie}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`,
-    Location: "/Admin/login.html",
+    Location: redirect,
   });
   response.end();
 }

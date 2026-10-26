@@ -1,0 +1,12 @@
+{
+  "name": "travlish",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Travlish car rental site and SQLite-backed admin dashboard",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  }
+}

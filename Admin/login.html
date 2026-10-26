@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0c0d0f">
+  <title>Admin sign in | Travel(e)sh Holidays</title>
+  <style>
+    :root{color-scheme:dark;--bg:#0c0d0f;--panel:#15171a;--text:#f7f7f7;--muted:#a7abb2;--orange:#f58220;--orange2:#ffad57;--line:rgba(255,255,255,.1)}
+    *{box-sizing:border-box}
+    body{margin:0;min-height:100vh;min-height:100svh;padding:24px;display:grid;place-items:center;background:radial-gradient(ellipse at 12% 8%,rgba(245,130,32,.13),transparent 34%),radial-gradient(ellipse at 88% 92%,rgba(245,130,32,.07),transparent 34%),var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    a{color:inherit;text-decoration:none}
+    button,input{font:inherit}
+    .shell{width:min(100%,960px);min-height:560px;display:grid;grid-template-columns:1.05fr .95fr;overflow:hidden;border:1px solid var(--line);border-radius:26px;background:var(--panel);box-shadow:0 28px 90px rgba(0,0,0,.42)}
+    .brand-panel{position:relative;isolation:isolate;overflow:hidden;display:flex;flex-direction:column;padding:38px;background:linear-gradient(145deg,#1c1e21,#111214 72%);border-right:1px solid var(--line)}
+    .brand-panel:before,.brand-panel:after{position:absolute;z-index:-1;content:"";border:1px solid rgba(245,130,32,.2);border-radius:50%;pointer-events:none}
+    .brand-panel:before{width:440px;height:440px;right:-180px;bottom:-115px}
+    .brand-panel:after{width:320px;height:320px;right:-120px;bottom:-55px}
+    .brand{display:flex;align-items:center;gap:12px;width:fit-content;font-weight:900;letter-spacing:.03em}
+    .brand-mark{width:44px;height:44px;display:grid;place-items:center;border-radius:14px;background:linear-gradient(135deg,var(--orange),var(--orange2));color:#17110c;font-size:.95rem;box-shadow:0 8px 28px rgba(245,130,32,.2)}
+    .brand small{display:block;margin-top:3px;color:var(--muted);font-size:.64rem;letter-spacing:.16em}
+    .brand-copy{margin:auto 0;max-width:400px;padding:50px 0}
+    .eyebrow{color:var(--orange2);font-size:.72rem;font-weight:800;letter-spacing:.17em;text-transform:uppercase}
+    h1{margin:17px 0 14px;font-size:clamp(2.6rem,5vw,4.1rem);line-height:1.02;letter-spacing:-.055em}
+    h1 span{color:var(--orange)}
+    .brand-copy p{max-width:340px;margin:0;color:#c3c5c9;line-height:1.75}
+    .brand-foot{color:var(--muted);font-size:.78rem}
+    .form-panel{align-self:center;width:100%;max-width:470px;margin:auto;padding:52px}
+    .form-panel .eyebrow{display:block;margin-bottom:12px}
+    .form-panel h2{margin:0;font-size:2rem;letter-spacing:-.045em}
+    .intro{margin:9px 0 27px;color:var(--muted);font-size:.92rem;line-height:1.65}
+    .alert{display:none;margin:0 0 18px;padding:12px 14px;border:1px solid rgba(255,112,112,.3);border-radius:11px;background:rgba(255,80,80,.08);color:#ffb3b3;font-size:.86rem}
+    .alert.visible{display:block}
+    .field{display:grid;gap:8px;margin-top:17px}
+    .field label{font-size:.82rem;font-weight:750}
+    .input-wrap{position:relative}
+    .field input{width:100%;height:49px;padding:0 14px;border:1px solid var(--line);border-radius:11px;outline:none;background:#0d0e10;color:var(--text)}
+    .field input:focus{border-color:var(--orange);box-shadow:0 0 0 3px rgba(245,130,32,.12)}
+    .field input::placeholder{color:#72767e}
+    .password-input{padding-right:75px!important}
+    .toggle{position:absolute;top:50%;right:8px;transform:translateY(-50%);border:0;border-radius:7px;padding:7px 9px;background:transparent;color:var(--orange2);font-size:.75rem;font-weight:800;cursor:pointer}
+    .submit{width:100%;min-height:49px;margin-top:24px;display:flex;align-items:center;justify-content:center;gap:10px;border:0;border-radius:11px;background:var(--orange);color:#17110c;font-weight:900;cursor:pointer;transition:background .2s,transform .2s}
+    .submit:hover{background:var(--orange2);transform:translateY(-1px)}
+    .submit:disabled{cursor:wait;opacity:.72;transform:none}
+    .home{display:block;margin-top:22px;text-align:center;color:var(--muted);font-size:.84rem}
+    .home:hover{color:var(--orange2)}
+    @media(max-width:720px){body{padding:14px}.shell{max-width:500px;min-height:0;grid-template-columns:1fr;border-radius:21px}.brand-panel{min-height:220px;padding:24px 26px;border-right:0;border-bottom:1px solid var(--line)}.brand-copy{margin:28px 0 0;padding:0}.brand-copy h1{margin:9px 0;font-size:2rem}.brand-copy p{font-size:.87rem}.brand-foot{display:none}.form-panel{padding:30px 26px 34px}}
+    @media(prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;transition:none!important}}
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="brand-panel" aria-label="Travel(e)sh Holidays">
+      <a class="brand" href="/" aria-label="Travel(e)sh Holidays home"><span class="brand-mark">TH</span><span>TRAVELESH HOLIDAYS<small>DELHI CANTT. · EVERY JOURNEY, ELEVATED</small></span></a>
+      <div class="brand-copy"><span class="eyebrow">ADMINISTRATOR ACCESS</span><h1>Keep every<br>journey <span>moving.</span></h1><p>Sign in to your secure Travel(e)sh Holidays workspace.</p></div>
+      <p class="brand-foot">Secure access · Authorized team members only</p>
+    </section>
+    <section class="form-panel" aria-labelledby="login-title">
+      <span class="eyebrow">WELCOME BACK</span>
+      <h2 id="login-title">Admin sign in</h2>
+      <p class="intro">Use your administrator account to continue.</p>
+      <div class="alert" id="login-alert" role="alert" aria-live="polite"></div>
+      <form id="login-form" action="/admin/auth/login" method="POST">
+        <div class="field"><label for="email">Email address</label><input id="email" name="email" type="email" placeholder="you@company.com" autocomplete="username" autocapitalize="none" spellcheck="false" required></div>
+        <div class="field"><label for="password">Password</label><div class="input-wrap"><input class="password-input" id="password" name="password" type="password" placeholder="Enter your password" autocomplete="current-password" required><button class="toggle" id="toggle-password" type="button" aria-label="Show password" aria-pressed="false">Show</button></div></div>
+        <button class="submit" id="login-button" type="submit">Sign in to dashboard <span aria-hidden="true">↗</span></button>
+      </form>
+      <a class="home" href="/">← Back to Travel(e)sh Holidays</a>
+    </section>
+  </main>
+  <script>
+    const passwordInput=document.getElementById("password");
+    const toggle=document.getElementById("toggle-password");
+    const form=document.getElementById("login-form");
+    const button=document.getElementById("login-button");
+    const alertBox=document.getElementById("login-alert");
+    toggle.addEventListener("click",()=>{
+      const visible=passwordInput.type==="password";
+      passwordInput.type=visible?"text":"password";
+      toggle.textContent=visible?"Hide":"Show";
+      toggle.setAttribute("aria-label",visible?"Hide password":"Show password");
+      toggle.setAttribute("aria-pressed",String(visible));
+    });
+    const error=new URLSearchParams(location.search).get("error");
+    if(error){alertBox.textContent=error;alertBox.classList.add("visible");}
+    form.addEventListener("submit",event=>{
+      if(!form.reportValidity()){event.preventDefault();return;}
+      button.disabled=true;
+      button.firstChild.textContent="Signing in… ";
+    });
+  </script>
+</body>
+</html>

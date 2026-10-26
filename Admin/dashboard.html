@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0c0d0f" />
+  <title>Admin Dashboard | Travlish</title>
+  <style>
+    :root {
+      --bg: #0c0d0f;
+      --panel: #15171a;
+      --panel-alt: #1b1d21;
+      --text: #f7f7f7;
+      --muted: #a7abb2;
+      --line: rgba(255,255,255,0.08);
+      --orange: #f58220;
+      --orange-2: #ffad57;
+      --green: #7ee7a6;
+      --red: #fca5a5;
+      --blue: #8ec5ff;
+      --shadow: 0 22px 60px rgba(0,0,0,0.28);
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      min-height: 100vh;
+      font-family: Inter, "Segoe UI", sans-serif;
+      color: var(--text);
+      background: radial-gradient(circle at top left, rgba(245,130,32,0.08), transparent 28%), var(--bg);
+    }
+    a { color: inherit; text-decoration: none; }
+    button, select { font: inherit; }
+    .container { width: min(1200px, calc(100% - 32px)); margin: 0 auto; }
+    .topbar {
+      position: sticky; top: 0; z-index: 20;
+      border-bottom: 1px solid var(--line);
+      background: rgba(12,13,15,0.9);
+      backdrop-filter: blur(14px);
+    }
+    .topbar-inner {
+      display: flex; align-items: center; justify-content: space-between; gap: 20px;
+      padding: 18px 0;
+    }
+    .brand {
+      display: flex; align-items: center; gap: 12px; font-weight: 900; letter-spacing: -0.04em;
+    }
+    .brand-mark {
+      width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center;
+      background: linear-gradient(135deg, var(--orange), var(--orange-2)); color: #17110c;
+      font-weight: 900;
+    }
+    .header-actions { display: flex; align-items: center; gap: 12px; }
+    .ghost-btn, .danger-btn, .success-btn, .primary-btn {
+      border: 1px solid var(--line); border-radius: 999px; padding: 10px 16px; cursor: pointer;
+      transition: 0.2s ease;
+    }
+    .ghost-btn { background: rgba(255,255,255,0.02); color: var(--text); }
+    .primary-btn {
+      background: linear-gradient(135deg, var(--orange), var(--orange-2));
+      border: 0; color: #17110c; font-weight: 800;
+    }
+    .success-btn { background: rgba(126, 231, 166, 0.08); color: var(--green); border-color: rgba(126, 231, 166, 0.2); }
+    .danger-btn { background: rgba(252, 165, 165, 0.08); color: var(--red); border-color: rgba(252,165,165,0.25); }
+    .main { padding: 28px 0 52px; }
+    .hero {
+      display: flex; justify-content: space-between; gap: 18px; align-items: center;
+      background: linear-gradient(135deg, rgba(245,130,32,0.17), rgba(245,130,32,0.04) 44%, rgba(14,15,18,0.8)), #14171a;
+      border: 1px solid rgba(245,130,32,0.18); border-radius: 22px; padding: 24px 28px; box-shadow: var(--shadow);
+      margin-bottom: 22px;
+    }
+    .hero h1 { margin: 0; font-size: clamp(2rem, 4vw, 3rem); letter-spacing: -0.06em; }
+    .hero p { margin: 6px 0 0; color: var(--muted); }
+    .badge { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 999px; background: rgba(126, 231, 166, 0.08); color: var(--green); border: 1px solid rgba(126,231,166,0.25); font-size: 0.75rem; font-weight: 700; }
+    .stats-grid {
+      display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; margin-bottom: 22px;
+    }
+    .card {
+      background: linear-gradient(180deg, #17191d, #121518);
+      border: 1px solid var(--line); border-radius: 18px; overflow: hidden;
+    }
+    .card-header {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      padding: 18px 20px; border-bottom: 1px solid var(--line);
+    }
+    .card-header h2, .card-header h3 { margin: 0; font-size: 1.08rem; }
+    .card-body { padding: 18px 20px; }
+    .stat-card {
+      background: linear-gradient(180deg, #17191d, #121518); border: 1px solid var(--line); border-radius: 18px; padding: 18px 18px 16px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.12);
+    }
+    .stat-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    .stat-icon {
+      width: 46px; height: 46px; border-radius: 14px; display: grid; place-items: center; font-size: 1.1rem;
+    }
+    .stat-icon.orange { background: rgba(245,130,32,0.12); color: var(--orange-2); }
+    .stat-icon.green { background: rgba(126,231,166,0.08); color: var(--green); }
+    .stat-icon.blue { background: rgba(142,197,255,0.08); color: var(--blue); }
+    .stat-icon.red { background: rgba(252,165,165,0.08); color: var(--red); }
+    .stat-value { font-size: clamp(1.8rem, 3vw, 2.5rem); font-weight: 900; letter-spacing: -0.05em; margin-top: 14px; }
+    .stat-label { margin-top: 6px; color: var(--muted); font-size: 0.8rem; }
+    .content-grid {
+      display: grid; grid-template-columns: 1.5fr 1fr; gap: 20px;
+    }
+    table {
+      width: 100%; border-collapse: collapse;
+      font-size: 0.92rem;
+    }
+    th, td { text-align: left; vertical-align: top; padding: 12px 10px; border-bottom: 1px solid var(--line); }
+    th { color: var(--muted); font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; }
+    .status-badge {
+      display: inline-flex; align-items: center; justify-content: center; padding: 5px 10px; border-radius: 999px; font-size: 0.68rem; font-weight: 800; text-transform: capitalize;
+    }
+    .status-badge.pending { background: rgba(245,130,32,0.12); color: var(--orange-2); }
+    .status-badge.confirmed { background: rgba(126,231,166,0.10); color: var(--green); }
+    .status-badge.completed { background: rgba(142,197,255,0.10); color: var(--blue); }
+    .status-badge.cancelled { background: rgba(252,165,165,0.12); color: var(--red); }
+    .status-badge.submitted, .status-badge.under_review { background: rgba(245,130,32,0.10); color: var(--orange-2); }
+    .status-badge.verified { background: rgba(126,231,166,0.10); color: var(--green); }
+    .status-badge.rejected { background: rgba(252,165,165,0.12); color: var(--red); }
+    .row-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+    .mini-btn {
+      display: inline-flex; align-items: center; justify-content: center; padding: 7px 10px; font-size: 0.72rem; border-radius: 999px; cursor: pointer;
+      border: 1px solid var(--line); background: rgba(255,255,255,0.02); color: var(--text);
+    }
+    .mini-btn.success { color: var(--green); border-color: rgba(126,231,166,0.25); background: rgba(126,231,166,0.08); }
+    .mini-btn.danger { color: var(--red); border-color: rgba(252,165,165,0.25); background: rgba(252,165,165,0.08); }
+    .muted { color: var(--muted); }
+    .empty { color: var(--muted); padding: 18px; border: 1px dashed var(--line); border-radius: 12px; }
+    .log-list { display: grid; gap: 10px; }
+    .log-item {
+      padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,0.02);
+      font-size: 0.85rem; color: var(--muted);
+    }
+    .log-item strong { color: var(--text); }
+    .log-item .time { display: block; margin-top: 5px; font-size: 0.7rem; color: var(--muted); }
+    .document-list { display: grid; gap: 12px; }
+    .doc-item {
+      border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; background: rgba(255,255,255,0.02);
+    }
+    .doc-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+    .doc-title { font-weight: 700; }
+    .doc-meta { margin-top: 6px; color: var(--muted); font-size: 0.82rem; line-height: 1.65; }
+    .doc-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+    @media (max-width: 900px) {
+      .stats-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
+      .content-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 620px) {
+      .stats-grid { grid-template-columns: 1fr; }
+      .hero { flex-direction: column; align-items: flex-start; }
+      .topbar-inner { flex-wrap: wrap; }
+      th:nth-child(1), td:nth-child(1) { min-width: 130px; }
+      table { display: block; overflow-x: auto; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="container topbar-inner">
+      <div class="brand"><span class="brand-mark">T</span> <span>Travlish Admin</span></div>
+      <div class="header-actions">
+        <button class="ghost-btn" id="refreshBtn" type="button">Refresh</button>
+        <button class="primary-btn" id="logoutBtn" type="button">Logout</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="main container">
+    <section class="hero">
+      <div>
+        <div class="badge">● Live operations</div>
+        <h1 id="adminWelcome">Admin dashboard</h1>
+        <p>Review car requests, approve bookings, and verify customer documents before handover.</p>
+      </div>
+      <button class="ghost-btn" type="button" id="openClientPortal">Client portal</button>
+    </section>
+
+    <section class="stats-grid" id="statsGrid"></section>
+
+    <div class="content-grid">
+      <section class="card">
+        <div class="card-header">
+          <h2>Booking requests</h2>
+        </div>
+        <div class="card-body">
+          <div id="bookingTableWrap"></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <h3>Verification queue</h3>
+        </div>
+        <div class="card-body">
+          <div id="verificationList" class="document-list"></div>
+        </div>
+      </section>
+    </div>
+
+    <section class="card" style="margin-top: 20px;">
+      <div class="card-header">
+        <h3>Recent audit log</h3>
+      </div>
+      <div class="card-body">
+        <div id="auditLog" class="log-list"></div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const statsGrid = document.getElementById('statsGrid');
+    const bookingTableWrap = document.getElementById('bookingTableWrap');
+    const verificationList = document.getElementById('verificationList');
+    const auditLog = document.getElementById('auditLog');
+    const adminWelcome = document.getElementById('adminWelcome');
+
+    function plural(value, singular, pluralLabel) {
+      return `${value} ${value === 1 ? singular : pluralLabel}`;
+    }
+
+    function titleCase(value) {
+      return String(value || '').replace(/_/g, ' ').replace(/\b\w/g, ch => ch.toUpperCase());
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+    }
+
+    function formatDate(value) {
+      if (!value) return '—';
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return value;
+      return date.toLocaleString();
+    }
+
+    function renderStats(stats = {}) {
+      const cards = [
+        { icon: '🚗', value: stats.bookings ?? 0, label: 'Bookings this month', tone: 'orange' },
+        { icon: '👥', value: stats.customers ?? 0, label: 'Customers', tone: 'green' },
+        { icon: '🔔', value: stats.enquiries ?? 0, label: 'Pending approvals', tone: 'blue' },
+        { icon: '🧾', value: stats.documentChecks ?? 0, label: 'Docs under review', tone: 'red' },
+      ];
+      statsGrid.innerHTML = cards.map(card => `
+        <div class="stat-card">
+          <div class="stat-header">
+            <div class="stat-icon ${card.tone}">${card.icon}</div>
+          </div>
+          <div class="stat-value">${card.value}</div>
+          <div class="stat-label">${card.label}</div>
+        </div>
+      `).join('');
+    }
+
+    function renderBookings(bookings = []) {
+      if (!bookings.length) {
+        bookingTableWrap.innerHTML = '<div class="empty">No booking requests yet.</div>';
+        return;
+      }
+
+      bookingTableWrap.innerHTML = `
+        <table>
+          <thead>
+            <tr>
+              <th>Customer</th>
+              <th>Car</th>
+              <th>Pickup</th>
+              <th>Status</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${bookings.map(item => `
+              <tr>
+                <td>
+                  <div><strong>${escapeHtml(item.customer || '—')}</strong></div>
+                  <div class="muted">${escapeHtml(item.email || item.phone || 'No contact')}</div>
+                </td>
+                <td>${escapeHtml(item.car || '—')}</td>
+                <td>
+                  <div>${escapeHtml(item.pickupDate || '—')}</div>
+                  <div class="muted">${escapeHtml(item.pickup || '—')}</div>
+                </td>
+                <td><span class="status-badge ${item.status}">${escapeHtml(titleCase(item.status || 'pending'))}</span></td>
+                <td>
+                  <div class="row-actions">
+                    <button class="mini-btn success" type="button" data-booking-action="confirmed" data-booking-id="${item.id}">Approve</button>
+                    <button class="mini-btn danger" type="button" data-booking-action="cancelled" data-booking-id="${item.id}">Reject</button>
+                  </div>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+
+      bookingTableWrap.querySelectorAll('[data-booking-action]').forEach(button => {
+        button.addEventListener('click', async () => {
+          const bookingId = Number(button.dataset.bookingId);
+          const status = button.dataset.bookingAction;
+          const remark = window.prompt('Add an optional review note:', `Booking marked as ${status}.`);
+          await updateBookingStatus(bookingId, status, remark || '');
+        });
+      });
+    }
+
+    function renderVerifications(rows = []) {
+      if (!rows.length) {
+        verificationList.innerHTML = '<div class="empty">No verification submissions in the queue.</div>';
+        return;
+      }
+      verificationList.innerHTML = rows.map(item => `
+        <div class="doc-item">
+          <div class="doc-header">
+            <div class="doc-title">${escapeHtml(titleCase(item.documentType || 'Document'))}</div>
+            <span class="status-badge ${item.status}">${escapeHtml(titleCase(item.status || 'submitted'))}</span>
+          </div>
+          <div class="doc-meta">
+            Customer: <strong>${escapeHtml(item.customerName || 'Unknown')}</strong><br>
+            Booking: #${escapeHtml(item.bookingId || '—')}<br>
+            Number: ${escapeHtml(item.documentNumber || '—')}<br>
+            Name / file: ${escapeHtml(item.documentName || '—')}<br>
+            Submitted: ${escapeHtml(formatDate(item.submittedAt))}
+          </div>
+          <div class="doc-actions">
+            <button class="mini-btn success" type="button" data-doc-action="verified" data-verification-id="${item.id}" data-booking-id="${item.bookingId}">Verify</button>
+            <button class="mini-btn danger" type="button" data-doc-action="rejected" data-verification-id="${item.id}" data-booking-id="${item.bookingId}">Reject</button>
+          </div>
+        </div>
+      `).join('');
+
+      verificationList.querySelectorAll('[data-doc-action]').forEach(button => {
+        button.addEventListener('click', async () => {
+          const verificationId = Number(button.dataset.verificationId);
+          const bookingId = Number(button.dataset.bookingId);
+          const status = button.dataset.docAction;
+          const remark = window.prompt('Add verification note (optional):', status === 'verified' ? 'Identity verified successfully.' : 'Document requires resubmission or correction.');
+          await updateVerificationStatus({ verificationId, bookingId, status, remark: remark || '' });
+        });
+      });
+    }
+
+    function renderAuditLog(logs = []) {
+      if (!logs.length) {
+        auditLog.innerHTML = '<div class="empty">No audit events yet.</div>';
+        return;
+      }
+      auditLog.innerHTML = logs.slice(0, 12).map(item => `
+        <div class="log-item">
+          <strong>${escapeHtml(item.event || 'Event')}</strong><br>
+          ${escapeHtml(item.details || 'No details attached.')}
+          <span class="time">${escapeHtml(formatDate(item.createdAt))}</span>
+        </div>
+      `).join('');
+    }
+
+    async function updateBookingStatus(bookingId, status, remark = '') {
+      try {
+        const response = await fetch('/api/admin/bookings/status', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: bookingId, status, remark }),
+          credentials: 'same-origin'
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Unable to update booking status.');
+        await loadDashboard();
+      } catch (error) {
+        window.alert(error.message);
+      }
+    }
+
+    async function updateVerificationStatus({ verificationId, bookingId, status, remark = '' }) {
+      try {
+        const response = await fetch(`/api/admin/document-verifications/${verificationId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ verificationId, bookingId, status, remark }),
+          credentials: 'same-origin'
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Unable to update verification status.');
+        await loadDashboard();
+      } catch (error) {
+        window.alert(error.message);
+      }
+    }
+
+    async function loadDashboard() {
+      try {
+        const [dashboardRes, verificationRes] = await Promise.all([
+          fetch('/api/admin/dashboard', { credentials: 'same-origin' }),
+          fetch('/api/admin/document-verifications', { credentials: 'same-origin' })
+        ]);
+
+        const dashboardData = dashboardRes.ok ? await dashboardRes.json() : { stats: {}, bookings: [] };
+        const verificationData = verificationRes.ok ? await verificationRes.json() : { rows: [], logs: [] };
+
+        if (!dashboardRes.ok) throw new Error(dashboardData.error || 'Unable to load admin dashboard.');
+        if (!verificationRes.ok) throw new Error(verificationData.error || 'Unable to load verification queue.');
+
+        renderStats(dashboardData.stats || {});
+        renderBookings(dashboardData.bookings || []);
+        renderVerifications(verificationData.rows || []);
+        renderAuditLog(verificationData.logs || []);
+        adminWelcome.textContent = `Welcome, Admin`;
+      } catch (error) {
+        bookingTableWrap.innerHTML = `<div class="empty">${escapeHtml(error.message || 'Unable to load dashboard data.')}</div>`;
+        verificationList.innerHTML = '<div class="empty">Verification data unavailable.</div>';
+        auditLog.innerHTML = '<div class="empty">Audit log unavailable.</div>';
+      }
+    }
+
+    document.getElementById('refreshBtn').addEventListener('click', loadDashboard);
+    document.getElementById('openClientPortal').addEventListener('click', () => {
+      window.location.href = '/Client/dashboard.html';
+    });
+    document.getElementById('logoutBtn').addEventListener('click', () => {
+      document.cookie = 'travlish_session=; Max-Age=0; path=/';
+      window.location.href = '/Admin/login.html';
+    });
+
+    loadDashboard();
+  </script>
+</body>
+</html>
